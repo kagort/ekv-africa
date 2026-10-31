@@ -1,0 +1,7 @@
+title: Страны экваториальной Африки
+description: Серия уроков географии — сайт класса
+remote_theme: just-the-docs/just-the-docs
+plugins:
+  - jekyll-remote-theme
+search_enabled: true
+footer_content: "Учебный проект класса. Места с пометкой [проверить] ждут фактчекера."
