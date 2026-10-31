@@ -1,0 +1,145 @@
+---
+title: Дашборд
+nav_order: 20
+layout: null
+---
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Дашборд — Страны экваториальной Африки</title>
+<!-- Библиотеки: карта (Leaflet) и графики (Chart.js) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<style>
+  :root { --bg: #F6F3EC; --card: #FFFDF8; --ink: #1C2230; --muted: #5F6473; --line: #DDD6C7; --blue: #1F5FA8; --orange: #C2611F; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  a { color: var(--blue); }
+  h1 { font-size: 28px; margin: 8px 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi, .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .kpi b { display: block; font-size: 28px; color: var(--blue); }
+  .kpi span { color: var(--muted); font-size: 14px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  #map { height: 420px; border-radius: 10px; }
+  .chart { height: 320px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td.num { text-align: right; white-space: nowrap; }
+  .note { color: var(--orange); font-size: 13px; }
+  .error { background: #FBE9E7; border: 1px solid #E8B4A8; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a href="./">← К урокам</a>
+  <h1>Страны экваториальной Африки</h1>
+  <p class="lead">Дашборд строится из таблицы <code>data/countries.csv</code>. Поменяйте таблицу — графики и карта обновятся сами.</p>
+  <div id="error"></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="card" style="margin-bottom:16px"><h2>Столицы на карте</h2><div id="map"></div></div>
+  <div class="grid">
+    <div class="card"><h2>Площадь, тыс. км²</h2><div class="chart"><canvas id="areaChart"></canvas></div></div>
+    <div class="card"><h2>Население, млн человек</h2><div class="chart"><canvas id="popChart"></canvas></div></div>
+  </div>
+  <div class="card"><h2>Таблица</h2><div id="table"></div></div>
+</div>
+
+<script>
+// 1. Читаем CSV: первая строка — названия столбцов, значения через запятую,
+//    текст с запятыми — в кавычках.
+function parseCSV(text) {
+  const rows = [];
+  let row = [], cell = '', inQuotes = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else cell += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); cell = '';
+      if (row.some(v => v.trim() !== '')) rows.push(row);
+      row = [];
+    } else cell += c;
+  }
+  row.push(cell);
+  if (row.some(v => v.trim() !== '')) rows.push(row);
+  const head = rows.shift().map(h => h.trim());
+  return rows.map(r => Object.fromEntries(head.map((h, i) => [h, (r[i] || '').trim()])));
+}
+const num = v => { const n = parseFloat(String(v).replace(',', '.').replace(/\s/g, '')); return isNaN(n) ? null : n; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = (n, d = 0) => n == null ? '—' : n.toLocaleString('ru-RU', { maximumFractionDigits: d });
+
+fetch('data/countries.csv', { cache: 'no-cache' })
+  .then(r => { if (!r.ok) throw new Error('Не найден файл data/countries.csv'); return r.text(); })
+  .then(text => draw(parseCSV(text)))
+  .catch(err => {
+    document.getElementById('error').innerHTML = '<div class="error">' + esc(err.message) +
+      '. Дашборд нужно открывать на сайте (github.io), а не двойным щелчком по файлу.</div>';
+  });
+
+function draw(rows) {
+  rows.forEach(r => { r.area = num(r.area_km2); r.pop = num(r.population_mln); r.la = num(r.lat); r.lo = num(r.lon); });
+
+  // 2. Сводка
+  const totalArea = rows.reduce((s, r) => s + (r.area || 0), 0);
+  const totalPop = rows.reduce((s, r) => s + (r.pop || 0), 0);
+  const biggest = rows.slice().sort((a, b) => (b.area || 0) - (a.area || 0))[0];
+  document.getElementById('kpis').innerHTML = [
+    [rows.length, 'стран в таблице'],
+    [fmt(totalArea / 1e6, 2) + ' млн км²', 'общая площадь'],
+    [fmt(totalPop, 1) + ' млн', 'общее население'],
+    [biggest ? biggest.country : '—', 'самая большая страна']
+  ].map(([v, l]) => '<div class="kpi"><b>' + esc(v) + '</b><span>' + esc(l) + '</span></div>').join('');
+
+  // 3. Карта: точка на каждую столицу, в подписи — ссылка на урок
+  const map = L.map('map', { scrollWheelZoom: false });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }).addTo(map);
+  const pts = [];
+  rows.forEach(r => {
+    if (r.la == null || r.lo == null) return;
+    pts.push([r.la, r.lo]);
+    const link = r.lesson ? '<br><a href="' + esc(r.lesson) + '">Открыть урок →</a>' : '';
+    L.circleMarker([r.la, r.lo], { radius: 8, color: '#1F5FA8', fillColor: '#1F5FA8', fillOpacity: 0.85 })
+      .bindPopup('<b>' + esc(r.country) + '</b><br>Столица: ' + esc(r.capital) + link)
+      .addTo(map);
+  });
+  if (pts.length) map.fitBounds(pts, { padding: [40, 40], maxZoom: 6 }); else map.setView([0, 15], 4);
+
+  // 4. Графики
+  const sorted = rows.slice().sort((a, b) => (b.area || 0) - (a.area || 0));
+  const bar = (id, label, values, color) => new Chart(document.getElementById(id), {
+    type: 'bar',
+    data: { labels: sorted.map(r => r.country), datasets: [{ label, data: values, backgroundColor: color, borderRadius: 4 }] },
+    options: { locale: 'ru-RU', indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+  bar('areaChart', 'Площадь, тыс. км²', sorted.map(r => r.area == null ? null : Math.round(r.area / 1000)), '#1F5FA8');
+  bar('popChart', 'Население, млн', sorted.map(r => r.pop), '#C2611F');
+
+  // 5. Таблица
+  document.getElementById('table').innerHTML = '<table><tr><th>Страна</th><th>Столица</th>' +
+    '<th style="text-align:right">Площадь, км²</th><th style="text-align:right">Население, млн</th><th>Год</th></tr>' +
+    sorted.map(r => '<tr><td>' + (r.lesson ? '<a href="' + esc(r.lesson) + '">' + esc(r.country) + '</a>' : esc(r.country)) +
+      (r.note ? '<div class="note">' + esc(r.note) + '</div>' : '') + '</td><td>' + esc(r.capital) + '</td>' +
+      '<td class="num">' + fmt(r.area) + '</td><td class="num">' + fmt(r.pop, 2) + '</td><td>' + esc(r.year || '') + '</td></tr>').join('') +
+    '</table>';
+}
+</script>
+</body>
+</html>
